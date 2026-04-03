@@ -7,8 +7,8 @@ import type { UserMission, CompleteMissionResponse } from "@/types/mission";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
-// Default user ID for demo purposes (would come from auth in production)
-const DEMO_USER_ID = "demo-user";
+// Temporary user ID until auth is implemented
+const DEFAULT_USER_ID = "user-1";
 
 export default function MissionsPage() {
   const [missions, setMissions] = useState<UserMission[]>([]);
@@ -23,7 +23,7 @@ export default function MissionsPage() {
       setError(null);
 
       const res = await fetch(
-        `${API_BASE}/api/v1/missions?user_id=${DEMO_USER_ID}`
+        `${API_BASE}/api/v1/missions?user_id=${DEFAULT_USER_ID}`
       );
       if (!res.ok) {
         throw new Error("ミッションの取得に失敗しました");
@@ -78,7 +78,7 @@ export default function MissionsPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              user_id: DEMO_USER_ID,
+              user_id: DEFAULT_USER_ID,
               lat,
               lng,
             }),

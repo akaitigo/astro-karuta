@@ -108,6 +108,11 @@ func (gm *GameManager) handleRandomMatch(clientID, playerName string) {
 
 		roomCode := generateRoomCode()
 		game := gm.createGameState(roomCode)
+		if game == nil {
+			gm.sendError(clientID, "failed to create game: could not load cards")
+			gm.sendError(otherClientID, "failed to create game: could not load cards")
+			return
+		}
 
 		gm.addPlayerToGame(game, otherClientID, otherName)
 		gm.addPlayerToGame(game, clientID, playerName)
@@ -120,9 +125,13 @@ func (gm *GameManager) handleRandomMatch(clientID, playerName string) {
 		gm.hub.JoinRoom(otherClientID, roomCode)
 		gm.hub.JoinRoom(clientID, roomCode)
 
-		matchMsg, _ := MarshalMessage(MsgMatchFound, PlayerJoinedPayload{
+		matchMsg, err := MarshalMessage(MsgMatchFound, PlayerJoinedPayload{
 			RoomCode: roomCode,
 		})
+		if err != nil {
+			log.Printf("failed to marshal match_found: %v", err)
+			return
+		}
 		gm.hub.SendTo(otherClientID, matchMsg)
 		gm.hub.SendTo(clientID, matchMsg)
 
@@ -134,14 +143,22 @@ func (gm *GameManager) handleRandomMatch(clientID, playerName string) {
 	gm.waitingNames[clientID] = playerName
 	gm.mu.Unlock()
 
-	waitMsg, _ := MarshalMessage(MsgWaiting, map[string]string{
+	waitMsg, err := MarshalMessage(MsgWaiting, map[string]string{
 		"message": "Waiting for opponent...",
 	})
+	if err != nil {
+		log.Printf("failed to marshal waiting: %v", err)
+		return
+	}
 	gm.hub.SendTo(clientID, waitMsg)
 }
 
 func (gm *GameManager) createGame(clientID, roomCode, playerName string) {
 	game := gm.createGameState(roomCode)
+	if game == nil {
+		gm.sendError(clientID, "failed to create game: could not load cards")
+		return
+	}
 	gm.addPlayerToGame(game, clientID, playerName)
 
 	gm.mu.Lock()
@@ -151,11 +168,15 @@ func (gm *GameManager) createGame(clientID, roomCode, playerName string) {
 
 	gm.hub.JoinRoom(clientID, roomCode)
 
-	joinedMsg, _ := MarshalMessage(MsgPlayerJoined, PlayerJoinedPayload{
+	joinedMsg, err := MarshalMessage(MsgPlayerJoined, PlayerJoinedPayload{
 		PlayerID:   clientID,
 		PlayerName: playerName,
 		RoomCode:   roomCode,
 	})
+	if err != nil {
+		log.Printf("failed to marshal player_joined: %v", err)
+		return
+	}
 	gm.hub.SendTo(clientID, joinedMsg)
 }
 
@@ -180,11 +201,15 @@ func (gm *GameManager) joinExistingGame(clientID, gameID, playerName string) {
 	gm.addPlayerToGame(game, clientID, playerName)
 	gm.hub.JoinRoom(clientID, game.RoomCode)
 
-	joinedMsg, _ := MarshalMessage(MsgPlayerJoined, PlayerJoinedPayload{
+	joinedMsg, err := MarshalMessage(MsgPlayerJoined, PlayerJoinedPayload{
 		PlayerID:   clientID,
 		PlayerName: playerName,
 		RoomCode:   game.RoomCode,
 	})
+	if err != nil {
+		log.Printf("failed to marshal player_joined: %v", err)
+		return
+	}
 	gm.hub.BroadcastToRoom(game.RoomCode, joinedMsg)
 
 	game.mu.RLock()
@@ -287,12 +312,16 @@ func (gm *GameManager) revealNextCard(game *GameState) {
 		}
 	}
 
-	msg, _ := MarshalMessage(MsgCardRevealed, CardRevealedPayload{
+	msg, err := MarshalMessage(MsgCardRevealed, CardRevealedPayload{
 		ReadingText: card.ReadingText,
 		Candidates:  candidateCards,
 		CardIndex:   cardIndex + 1,
 		TotalCards:  totalCards,
 	})
+	if err != nil {
+		log.Printf("failed to marshal card_revealed: %v", err)
+		return
+	}
 	gm.hub.BroadcastToRoom(game.RoomCode, msg)
 }
 
@@ -322,26 +351,30 @@ func (gm *GameManager) HandleGrab(clientID string, payload GrabPayload) {
 	correct := payload.CardID == currentCard.ID
 
 	game.mu.Lock()
-	game.GrabHandled = true
 
 	playerName := ""
 	if correct {
+		game.GrabHandled = true
 		if player, ok := game.Players[clientID]; ok {
 			player.Score++
 			player.CapturedIDs = append(player.CapturedIDs, currentCard.ID)
 			playerName = player.Name
 		}
+		game.CurrentIndex++
 	}
-	game.CurrentIndex++
 	game.mu.Unlock()
 
-	resultMsg, _ := MarshalMessage(MsgGrabResult, GrabResultPayload{
+	resultMsg, err := MarshalMessage(MsgGrabResult, GrabResultPayload{
 		WinnerID:   clientID,
 		WinnerName: playerName,
 		CardID:     currentCard.ID,
 		CardName:   currentCard.Name,
 		Correct:    correct,
 	})
+	if err != nil {
+		log.Printf("failed to marshal grab_result: %v", err)
+		return
+	}
 	gm.hub.BroadcastToRoom(game.RoomCode, resultMsg)
 
 	if correct {
@@ -388,7 +421,11 @@ func (gm *GameManager) HandleReconnect(clientID string, payload ReconnectPayload
 	}
 	game.mu.RUnlock()
 
-	stateMsg, _ := MarshalMessage(MsgGameState, statePayload)
+	stateMsg, err := MarshalMessage(MsgGameState, statePayload)
+	if err != nil {
+		log.Printf("failed to marshal game_state: %v", err)
+		return
+	}
 	gm.hub.SendTo(clientID, stateMsg)
 }
 
@@ -411,10 +448,14 @@ func (gm *GameManager) HandleDisconnect(clientID string) {
 	game.mu.Unlock()
 
 	// Notify other players
-	msg, _ := MarshalMessage(MsgPlayerLeft, map[string]string{
+	msg, err := MarshalMessage(MsgPlayerLeft, map[string]string{
 		"player_id": clientID,
 	})
-	gm.hub.BroadcastToRoom(game.RoomCode, msg)
+	if err != nil {
+		log.Printf("failed to marshal player_left: %v", err)
+	} else {
+		gm.hub.BroadcastToRoom(game.RoomCode, msg)
+	}
 
 	// Set reconnect timeout
 	time.AfterFunc(reconnectTimeout, func() {
@@ -460,11 +501,15 @@ func (gm *GameManager) endGame(game *GameState) {
 	roomCode := game.RoomCode
 	game.mu.Unlock()
 
-	msg, _ := MarshalMessage(MsgGameOver, GameOverPayload{
+	msg, err := MarshalMessage(MsgGameOver, GameOverPayload{
 		Players:  results,
 		WinnerID: winnerID,
 	})
-	gm.hub.BroadcastToRoom(roomCode, msg)
+	if err != nil {
+		log.Printf("failed to marshal game_over: %v", err)
+	} else {
+		gm.hub.BroadcastToRoom(roomCode, msg)
+	}
 
 	// Cleanup
 	gm.mu.Lock()
@@ -489,7 +534,11 @@ func (gm *GameManager) findGameByClient(clientID string) *GameState {
 }
 
 func (gm *GameManager) sendError(clientID, message string) {
-	msg, _ := MarshalMessage(MsgError, ErrorPayload{Message: message})
+	msg, err := MarshalMessage(MsgError, ErrorPayload{Message: message})
+	if err != nil {
+		log.Printf("failed to marshal error message for client %s: %v", clientID, err)
+		return
+	}
 	gm.hub.SendTo(clientID, msg)
 }
 

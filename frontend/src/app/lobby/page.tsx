@@ -6,7 +6,7 @@ import { MatchmakingSpinner } from "@/components/MatchmakingSpinner";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import type { WSMessage } from "@/types/game";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/ws";
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/api/v1/ws";
 
 export default function LobbyPage() {
   const router = useRouter();
