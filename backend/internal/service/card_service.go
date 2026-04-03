@@ -11,8 +11,9 @@ import (
 
 // CardService provides business logic for card operations.
 type CardService struct {
-	cardRepo repository.CardRepository
-	deckRepo repository.DeckRepository
+	cardRepo    repository.CardRepository
+	deckRepo    repository.DeckRepository
+	seasonalSvc *SeasonalService
 }
 
 // NewCardService creates a new CardService.
@@ -21,6 +22,11 @@ func NewCardService(cardRepo repository.CardRepository, deckRepo repository.Deck
 		cardRepo: cardRepo,
 		deckRepo: deckRepo,
 	}
+}
+
+// SetSeasonalService sets the seasonal service for deck generation.
+func (s *CardService) SetSeasonalService(svc *SeasonalService) {
+	s.seasonalSvc = svc
 }
 
 // ListCards returns cards filtered by the given criteria.
@@ -64,7 +70,12 @@ func (s *CardService) GetDeck(ctx context.Context, id string) (*model.Deck, erro
 }
 
 // GetSeasonalDeck returns the seasonal deck for the current month.
+// If a SeasonalService is set, it delegates to that service for automatic
+// deck generation based on visible constellations.
 func (s *CardService) GetSeasonalDeck(ctx context.Context) (*model.Deck, error) {
+	if s.seasonalSvc != nil {
+		return s.seasonalSvc.GetSeasonalDeck(ctx)
+	}
 	month := time.Now().Month()
 	return s.deckRepo.GetSeasonal(ctx, month)
 }
