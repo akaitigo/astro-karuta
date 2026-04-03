@@ -1,0 +1,21 @@
+{
+  "name": "Astro-Karuta",
+  "short_name": "AstroKaruta",
+  "description": "天文知識をかるた形式で学ぶ天文教育ゲーム",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#1e3a5f",
+  "icons": [
+    {
+      "src": "/images/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/images/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

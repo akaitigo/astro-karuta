@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS observation_missions;
+DROP TABLE IF EXISTS collections;
+DROP TABLE IF EXISTS game_players;
+DROP TABLE IF EXISTS games;
+DROP TABLE IF EXISTS decks;
+DROP TABLE IF EXISTS cards;
+DROP TABLE IF EXISTS users;
