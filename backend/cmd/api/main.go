@@ -25,6 +25,7 @@ func main() {
 
 	cardRepo := repository.NewInMemoryCardRepository()
 	deckRepo := repository.NewInMemoryDeckRepository()
+	collectionRepo := repository.NewInMemoryCollectionRepository(cardRepo)
 
 	if err := seed.LoadCards(context.Background(), cardRepo); err != nil {
 		log.Fatalf("failed to seed cards: %v", err)
@@ -33,6 +34,9 @@ func main() {
 
 	cardSvc := service.NewCardService(cardRepo, deckRepo)
 	cardHandler := handler.NewCardHandler(cardSvc)
+
+	collectionSvc := service.NewCollectionService(collectionRepo)
+	collectionHandler := handler.NewCollectionHandler(collectionSvc)
 
 	hub := ws.NewHub()
 	gm := ws.NewGameManager(hub, cardRepo)
@@ -44,6 +48,7 @@ func main() {
 		fmt.Fprintf(w, `{"status":"ok"}`)
 	})
 	cardHandler.RegisterRoutes(mux)
+	collectionHandler.RegisterRoutes(mux)
 	wsHandler.RegisterRoutes(mux)
 
 	srv := &http.Server{
