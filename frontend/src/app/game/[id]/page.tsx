@@ -10,7 +10,7 @@ import { MatchmakingSpinner } from "@/components/MatchmakingSpinner";
 import { useGame } from "@/hooks/useGame";
 import { useAudio } from "@/hooks/useAudio";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/ws";
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/api/v1/ws";
 
 export default function GamePage() {
   const params = useParams();

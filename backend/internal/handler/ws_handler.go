@@ -3,6 +3,9 @@ package handler
 import (
 	"log"
 	"net/http"
+	"os"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/akaitigo/astro-karuta/backend/internal/ws"
@@ -15,21 +18,46 @@ const (
 	pongWait   = 60 * time.Second
 	pingPeriod = (pongWait * 9) / 10
 	maxMsgSize = 4096
+	// maxWSConnections limits the total number of concurrent WebSocket connections.
+	maxWSConnections = 200
 )
+
+// allowedOrigins returns the set of allowed WebSocket origins from the
+// CORS_ORIGIN environment variable. Multiple origins can be separated by
+// commas. When the variable is empty the default development origin is used.
+func allowedOrigins() map[string]bool {
+	raw := os.Getenv("CORS_ORIGIN")
+	if raw == "" {
+		raw = "http://localhost:3000"
+	}
+	origins := make(map[string]bool)
+	for _, o := range strings.Split(raw, ",") {
+		o = strings.TrimSpace(o)
+		if o != "" {
+			origins[o] = true
+		}
+	}
+	return origins
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// TODO: restrict to CORS_ORIGIN in production
-		return true
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			// Allow connections without an Origin header (e.g. non-browser clients).
+			return true
+		}
+		return allowedOrigins()[origin]
 	},
 }
 
 // WSHandler handles WebSocket connections.
 type WSHandler struct {
-	hub *ws.Hub
-	gm  *ws.GameManager
+	hub       *ws.Hub
+	gm        *ws.GameManager
+	connCount atomic.Int64
 }
 
 // NewWSHandler creates a new WSHandler.
@@ -44,11 +72,18 @@ func (h *WSHandler) RegisterRoutes(mux *http.ServeMux) {
 
 // ServeWS upgrades an HTTP connection to WebSocket.
 func (h *WSHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
+	if h.connCount.Load() >= maxWSConnections {
+		http.Error(w, "too many connections", http.StatusServiceUnavailable)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ws upgrade error: %v", err)
 		return
 	}
+
+	h.connCount.Add(1)
 
 	clientID := uuid.New().String()
 	client := &ws.Client{
@@ -60,11 +95,12 @@ func (h *WSHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 
 	h.hub.Register(client)
 	go h.writePump(client)
-	go h.readPump(client)
+	go h.readPump(client, &h.connCount)
 }
 
-func (h *WSHandler) readPump(client *ws.Client) {
+func (h *WSHandler) readPump(client *ws.Client, connCount *atomic.Int64) {
 	defer func() {
+		connCount.Add(-1)
 		h.gm.HandleDisconnect(client.ID)
 		h.hub.Unregister(client)
 		client.Conn.Close()

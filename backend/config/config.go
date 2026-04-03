@@ -12,8 +12,8 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		Port:        getEnv("PORT", "8080"),
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://user:password@localhost:5432/astro_karuta?sslmode=disable"),
-		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
+		DatabaseURL: getEnv("DATABASE_URL", ""),
+		RedisURL:    getEnv("REDIS_URL", ""),
 		CORSOrigin:  getEnv("CORS_ORIGIN", "http://localhost:3000"),
 	}
 }
