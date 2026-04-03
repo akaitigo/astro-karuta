@@ -32,11 +32,19 @@ func main() {
 	}
 	log.Println("seeded card data")
 
+	missionRepo := repository.NewInMemoryMissionRepository()
+
+	seasonalSvc := service.NewSeasonalService(cardRepo, deckRepo)
+	missionSvc := service.NewMissionService(missionRepo, cardRepo)
+
 	cardSvc := service.NewCardService(cardRepo, deckRepo)
+	cardSvc.SetSeasonalService(seasonalSvc)
 	cardHandler := handler.NewCardHandler(cardSvc)
 
 	collectionSvc := service.NewCollectionService(collectionRepo)
 	collectionHandler := handler.NewCollectionHandler(collectionSvc)
+
+	seasonalHandler := handler.NewSeasonalHandler(missionSvc, seasonalSvc)
 
 	hub := ws.NewHub()
 	gm := ws.NewGameManager(hub, cardRepo)
@@ -49,6 +57,7 @@ func main() {
 	})
 	cardHandler.RegisterRoutes(mux)
 	collectionHandler.RegisterRoutes(mux)
+	seasonalHandler.RegisterRoutes(mux)
 	wsHandler.RegisterRoutes(mux)
 
 	srv := &http.Server{
