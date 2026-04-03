@@ -106,7 +106,9 @@ func (h *WSHandler) writePump(client *ws.Client) {
 				return
 			}
 			if !ok {
-				client.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := client.Conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+					log.Printf("ws: failed to send close message: %v", err)
+				}
 				return
 			}
 			if err := client.Conn.WriteMessage(websocket.TextMessage, message); err != nil {

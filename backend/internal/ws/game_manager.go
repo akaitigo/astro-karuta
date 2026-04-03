@@ -37,7 +37,6 @@ type GameState struct {
 	GrabHandled    bool
 	TimeLimitSec   int
 	StartedAt      time.Time
-	cancelReveal   context.CancelFunc
 }
 
 // PlayerState tracks an individual player within a game.
