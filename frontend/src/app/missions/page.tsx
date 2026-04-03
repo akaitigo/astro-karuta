@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import MissionCard from "@/components/MissionCard";
 import type { UserMission, CompleteMissionResponse } from "@/types/mission";
 
@@ -171,7 +172,7 @@ export default function MissionsPage() {
       )}
 
       <div style={{ marginTop: "24px" }}>
-        <a
+        <Link
           href="/"
           style={{
             color: "#1565C0",
@@ -180,7 +181,7 @@ export default function MissionsPage() {
           }}
         >
           ホームに戻る
-        </a>
+        </Link>
       </div>
     </main>
   );

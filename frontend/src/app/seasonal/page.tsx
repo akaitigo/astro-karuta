@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import type { Deck, Card } from "@/types/card";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -122,7 +123,7 @@ export default function SeasonalPage() {
         ))}
       </div>
 
-      <a
+      <Link
         href="/"
         style={{
           display: "inline-block",
@@ -136,7 +137,7 @@ export default function SeasonalPage() {
         }}
       >
         このデッキで遊ぶ
-      </a>
+      </Link>
     </main>
   );
 }
