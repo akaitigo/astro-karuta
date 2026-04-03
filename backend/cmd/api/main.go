@@ -14,6 +14,7 @@ import (
 	"github.com/akaitigo/astro-karuta/backend/internal/repository"
 	"github.com/akaitigo/astro-karuta/backend/internal/seed"
 	"github.com/akaitigo/astro-karuta/backend/internal/service"
+	"github.com/akaitigo/astro-karuta/backend/internal/ws"
 )
 
 func main() {
@@ -33,12 +34,17 @@ func main() {
 	cardSvc := service.NewCardService(cardRepo, deckRepo)
 	cardHandler := handler.NewCardHandler(cardSvc)
 
+	hub := ws.NewHub()
+	gm := ws.NewGameManager(hub, cardRepo)
+	wsHandler := handler.NewWSHandler(hub, gm)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok"}`)
 	})
 	cardHandler.RegisterRoutes(mux)
+	wsHandler.RegisterRoutes(mux)
 
 	srv := &http.Server{
 		Addr:         ":" + port,
