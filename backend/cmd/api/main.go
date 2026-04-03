@@ -9,6 +9,11 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/akaitigo/astro-karuta/backend/internal/handler"
+	"github.com/akaitigo/astro-karuta/backend/internal/repository"
+	"github.com/akaitigo/astro-karuta/backend/internal/seed"
+	"github.com/akaitigo/astro-karuta/backend/internal/service"
 )
 
 func main() {
@@ -17,11 +22,23 @@ func main() {
 		port = "8080"
 	}
 
+	cardRepo := repository.NewInMemoryCardRepository()
+	deckRepo := repository.NewInMemoryDeckRepository()
+
+	if err := seed.LoadCards(context.Background(), cardRepo); err != nil {
+		log.Fatalf("failed to seed cards: %v", err)
+	}
+	log.Println("seeded card data")
+
+	cardSvc := service.NewCardService(cardRepo, deckRepo)
+	cardHandler := handler.NewCardHandler(cardSvc)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok"}`)
 	})
+	cardHandler.RegisterRoutes(mux)
 
 	srv := &http.Server{
 		Addr:         ":" + port,
