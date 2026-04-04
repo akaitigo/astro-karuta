@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/akaitigo/astro-karuta/backend/internal/model"
@@ -16,6 +17,8 @@ import (
 type SeasonalService struct {
 	cardRepo repository.CardRepository
 	deckRepo repository.DeckRepository
+	// R5-H6: mutex to prevent concurrent deck creation for the same month
+	generateMu sync.Mutex
 }
 
 // NewSeasonalService creates a new SeasonalService.
@@ -28,14 +31,27 @@ func NewSeasonalService(cardRepo repository.CardRepository, deckRepo repository.
 
 // GenerateSeasonalDeck creates or retrieves a seasonal deck
 // containing cards for constellations visible in the given month.
+// R5-H6: uses mutex + retry pattern to prevent duplicate deck creation
+// when concurrent requests arrive for the same month.
 func (s *SeasonalService) GenerateSeasonalDeck(ctx context.Context, month int) (*model.Deck, error) {
 	if month < 1 || month > 12 {
 		return nil, fmt.Errorf("invalid month: %d", month)
 	}
 
-	// Try to get an existing seasonal deck for this month
 	m := time.Month(month)
+
+	// First attempt: read without lock (fast path)
 	existing, err := s.deckRepo.GetSeasonal(ctx, m)
+	if err == nil && existing != nil {
+		return existing, nil
+	}
+
+	// Slow path: acquire mutex and re-check before creating
+	s.generateMu.Lock()
+	defer s.generateMu.Unlock()
+
+	// Re-check after acquiring lock (another goroutine may have created it)
+	existing, err = s.deckRepo.GetSeasonal(ctx, m)
 	if err == nil && existing != nil {
 		return existing, nil
 	}

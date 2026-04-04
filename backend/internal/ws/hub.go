@@ -126,6 +126,30 @@ func (h *Hub) GetClientsByRoom(roomCode string) []string {
 	return ids
 }
 
+// Shutdown gracefully closes all client connections and channels.
+// R5-H3: prevents WebSocket goroutine leaks on server shutdown.
+func (h *Hub) Shutdown() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for id, client := range h.clients {
+		close(client.Send)
+		if client.Conn != nil {
+			if err := client.Conn.Close(); err != nil {
+				log.Printf("hub: error closing connection for client %s: %v", id, err)
+			}
+		}
+		delete(h.clients, id)
+	}
+
+	// Clear all rooms
+	for code := range h.rooms {
+		delete(h.rooms, code)
+	}
+
+	log.Println("hub: all WebSocket connections shut down")
+}
+
 // JoinRoom moves a client to a room.
 func (h *Hub) JoinRoom(clientID, roomCode string) {
 	h.mu.Lock()
