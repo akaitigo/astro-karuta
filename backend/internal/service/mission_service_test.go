@@ -14,11 +14,12 @@ func setupMissionService(t *testing.T) (*service.MissionService, *repository.InM
 	t.Helper()
 	cardRepo := repository.NewInMemoryCardRepository()
 	missionRepo := repository.NewInMemoryMissionRepository()
+	collectionRepo := repository.NewInMemoryCollectionRepository(cardRepo)
 
 	if err := seed.LoadCards(context.Background(), cardRepo); err != nil {
 		t.Fatal(err)
 	}
-	svc := service.NewMissionService(missionRepo, cardRepo)
+	svc := service.NewMissionService(missionRepo, cardRepo, collectionRepo)
 	return svc, cardRepo
 }
 
@@ -36,7 +37,7 @@ func TestMissionService_GetActiveMissions_GeneratesMissions(t *testing.T) {
 
 	// Set time to July (summer) for predictable results
 	svc.SetNowFunc(func() time.Time {
-		return time.Date(2026, 7, 15, 20, 0, 0, 0, time.Local)
+		return time.Date(2026, 7, 15, 20, 0, 0, 0, time.UTC)
 	})
 
 	missions, err := svc.GetActiveMissions(context.Background(), "user-1")
@@ -64,7 +65,7 @@ func TestMissionService_GetActiveMissions_ReturnsCached(t *testing.T) {
 	svc, _ := setupMissionService(t)
 
 	svc.SetNowFunc(func() time.Time {
-		return time.Date(2026, 7, 15, 20, 0, 0, 0, time.Local)
+		return time.Date(2026, 7, 15, 20, 0, 0, 0, time.UTC)
 	})
 
 	// First call generates
@@ -89,7 +90,7 @@ func TestMissionService_CompleteMission_Success(t *testing.T) {
 
 	// Generate missions at nighttime in July
 	svc.SetNowFunc(func() time.Time {
-		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.Local)
+		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.UTC)
 	})
 
 	missions, err := svc.GetActiveMissions(context.Background(), "user-1")
@@ -138,7 +139,7 @@ func TestMissionService_CompleteMission_WrongUser(t *testing.T) {
 	svc, _ := setupMissionService(t)
 
 	svc.SetNowFunc(func() time.Time {
-		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.Local)
+		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.UTC)
 	})
 
 	missions, err := svc.GetActiveMissions(context.Background(), "user-1")
@@ -158,7 +159,7 @@ func TestMissionService_CompleteMission_Daytime(t *testing.T) {
 
 	// Generate at night
 	svc.SetNowFunc(func() time.Time {
-		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.Local)
+		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.UTC)
 	})
 
 	missions, err := svc.GetActiveMissions(context.Background(), "user-1")
@@ -168,7 +169,7 @@ func TestMissionService_CompleteMission_Daytime(t *testing.T) {
 
 	// Try to complete during daytime
 	svc.SetNowFunc(func() time.Time {
-		return time.Date(2026, 7, 15, 12, 0, 0, 0, time.Local)
+		return time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	})
 
 	_, err = svc.CompleteMission(context.Background(), "user-1", missions[0].ID, 35.0, 139.0)
@@ -181,7 +182,7 @@ func TestMissionService_CompleteMission_LocationTooFar(t *testing.T) {
 	svc, _ := setupMissionService(t)
 
 	svc.SetNowFunc(func() time.Time {
-		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.Local)
+		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.UTC)
 	})
 
 	missions, err := svc.GetActiveMissions(context.Background(), "user-1")
@@ -200,7 +201,7 @@ func TestMissionService_CompleteMission_AlreadyCompleted(t *testing.T) {
 	svc, _ := setupMissionService(t)
 
 	svc.SetNowFunc(func() time.Time {
-		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.Local)
+		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.UTC)
 	})
 
 	missions, err := svc.GetActiveMissions(context.Background(), "user-1")
@@ -221,12 +222,84 @@ func TestMissionService_CompleteMission_AlreadyCompleted(t *testing.T) {
 	}
 }
 
+func TestMissionService_CompleteMission_ZeroCoordinates(t *testing.T) {
+	svc, _ := setupMissionService(t)
+
+	svc.SetNowFunc(func() time.Time {
+		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.UTC)
+	})
+
+	missions, err := svc.GetActiveMissions(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// H6: lat=0 AND lng=0 should be rejected
+	_, err = svc.CompleteMission(context.Background(), "user-1", missions[0].ID, 0.0, 0.0)
+	if err == nil {
+		t.Fatal("expected error for zero coordinates")
+	}
+}
+
+func TestMissionService_CompleteMission_AddsToCollection(t *testing.T) {
+	cardRepo := repository.NewInMemoryCardRepository()
+	missionRepo := repository.NewInMemoryMissionRepository()
+	collectionRepo := repository.NewInMemoryCollectionRepository(cardRepo)
+
+	if err := seed.LoadCards(context.Background(), cardRepo); err != nil {
+		t.Fatal(err)
+	}
+	svc := service.NewMissionService(missionRepo, cardRepo, collectionRepo)
+
+	// Generate missions at nighttime in July
+	svc.SetNowFunc(func() time.Time {
+		return time.Date(2026, 7, 15, 21, 0, 0, 0, time.UTC)
+	})
+
+	missions, err := svc.GetActiveMissions(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(missions) == 0 {
+		t.Fatal("expected missions to be generated")
+	}
+
+	// Complete the first mission
+	resp, err := svc.CompleteMission(context.Background(), "user-1", missions[0].ID, 35.0, 139.0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.BonusCard == nil {
+		t.Fatal("expected bonus card")
+	}
+
+	// H10: verify the card was added to the collection
+	entries, err := collectionRepo.GetCollection(context.Background(), "user-1", "")
+	if err != nil {
+		t.Fatalf("unexpected error getting collection: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one collection entry after mission completion")
+	}
+
+	found := false
+	for _, e := range entries {
+		if e.CardID == missions[0].CardID && e.Source == "mission" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("bonus card not found in collection with source=mission")
+	}
+}
+
 func TestMissionService_CompleteMission_NighttimeBoundary(t *testing.T) {
 	svc, _ := setupMissionService(t)
 
 	// Generate missions
 	svc.SetNowFunc(func() time.Time {
-		return time.Date(2026, 7, 15, 22, 0, 0, 0, time.Local)
+		return time.Date(2026, 7, 15, 22, 0, 0, 0, time.UTC)
 	})
 
 	missions, err := svc.GetActiveMissions(context.Background(), "user-1")
@@ -254,7 +327,7 @@ func TestMissionService_CompleteMission_NighttimeBoundary(t *testing.T) {
 			// Re-setup to get fresh missions
 			innerSvc, _ := setupMissionService(t)
 			innerSvc.SetNowFunc(func() time.Time {
-				return time.Date(2026, 7, 15, 22, 0, 0, 0, time.Local)
+				return time.Date(2026, 7, 15, 22, 0, 0, 0, time.UTC)
 			})
 
 			innerMissions, err := innerSvc.GetActiveMissions(context.Background(), "user-1")
@@ -264,7 +337,7 @@ func TestMissionService_CompleteMission_NighttimeBoundary(t *testing.T) {
 			_ = missionID // referenced from outer scope only as pattern
 
 			innerSvc.SetNowFunc(func() time.Time {
-				return time.Date(2026, 7, 15, tc.hour, 0, 0, 0, time.Local)
+				return time.Date(2026, 7, 15, tc.hour, 0, 0, 0, time.UTC)
 			})
 
 			_, err = innerSvc.CompleteMission(context.Background(), "user-1", innerMissions[0].ID, 35.0, 139.0)

@@ -19,11 +19,10 @@ export interface Game {
   time_limit_sec: number;
 }
 
+// H4: removed "start" and "card_grabbed" that do not exist in backend ws/message.go
 export type WSMessageType =
   | "join"
-  | "start"
   | "card_revealed"
-  | "card_grabbed"
   | "grab"
   | "grab_result"
   | "game_over"

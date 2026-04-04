@@ -261,3 +261,238 @@ func TestGameManager_ProcessMessage_UnknownType(t *testing.T) {
 		t.Fatal("timeout")
 	}
 }
+
+// --- C1: PlayerName validation tests ---
+
+func TestGameManager_Join_EmptyPlayerName(t *testing.T) {
+	hub := ws.NewHub()
+	repo := seedTestCards(t)
+	gm := ws.NewGameManager(hub, repo)
+
+	c1 := newTestClient("p1", "")
+	hub.Register(c1)
+
+	gm.HandleJoin("p1", ws.JoinPayload{PlayerName: "", RandomMatch: true})
+
+	select {
+	case raw := <-c1.Send:
+		var m ws.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgError {
+			t.Errorf("expected error for empty name, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestGameManager_Join_PlayerNameTooLong(t *testing.T) {
+	hub := ws.NewHub()
+	repo := seedTestCards(t)
+	gm := ws.NewGameManager(hub, repo)
+
+	c1 := newTestClient("p1", "")
+	hub.Register(c1)
+
+	longName := "ABCDEFGHIJKLMNOPQRSTU" // 21 chars
+	gm.HandleJoin("p1", ws.JoinPayload{PlayerName: longName, RandomMatch: true})
+
+	select {
+	case raw := <-c1.Send:
+		var m ws.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgError {
+			t.Errorf("expected error for long name, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestGameManager_Join_PlayerNameControlChars(t *testing.T) {
+	hub := ws.NewHub()
+	repo := seedTestCards(t)
+	gm := ws.NewGameManager(hub, repo)
+
+	c1 := newTestClient("p1", "")
+	hub.Register(c1)
+
+	gm.HandleJoin("p1", ws.JoinPayload{PlayerName: "bad\x00name", RandomMatch: true})
+
+	select {
+	case raw := <-c1.Send:
+		var m ws.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgError {
+			t.Errorf("expected error for control chars, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+// --- C1: RoomCode validation tests ---
+
+func TestGameManager_Join_InvalidRoomCode(t *testing.T) {
+	hub := ws.NewHub()
+	repo := seedTestCards(t)
+	gm := ws.NewGameManager(hub, repo)
+
+	c1 := newTestClient("p1", "")
+	hub.Register(c1)
+
+	// lowercase is invalid
+	gm.HandleJoin("p1", ws.JoinPayload{PlayerName: "Alice", RoomCode: "abcdef"})
+
+	select {
+	case raw := <-c1.Send:
+		var m ws.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgError {
+			t.Errorf("expected error for invalid room code, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestGameManager_Join_RoomCodeWrongLength(t *testing.T) {
+	hub := ws.NewHub()
+	repo := seedTestCards(t)
+	gm := ws.NewGameManager(hub, repo)
+
+	c1 := newTestClient("p1", "")
+	hub.Register(c1)
+
+	gm.HandleJoin("p1", ws.JoinPayload{PlayerName: "Alice", RoomCode: "ABC"})
+
+	select {
+	case raw := <-c1.Send:
+		var m ws.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgError {
+			t.Errorf("expected error for short room code, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestGameManager_Join_ValidRoomCode(t *testing.T) {
+	hub := ws.NewHub()
+	repo := seedTestCards(t)
+	gm := ws.NewGameManager(hub, repo)
+
+	c1 := newTestClient("p1", "")
+	hub.Register(c1)
+
+	gm.HandleJoin("p1", ws.JoinPayload{PlayerName: "Alice", RoomCode: "ABC123"})
+
+	select {
+	case raw := <-c1.Send:
+		var m ws.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		// Should get player_joined (not error)
+		if m.Type != ws.MsgPlayerJoined {
+			t.Errorf("expected player_joined, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+// --- C2: HandleGrab when not playing ---
+
+func TestGameManager_GrabNotPlaying(t *testing.T) {
+	hub := ws.NewHub()
+	repo := seedTestCards(t)
+	gm := ws.NewGameManager(hub, repo)
+
+	c1 := newTestClient("p1", "")
+	hub.Register(c1)
+
+	// Create a room but don't start the game (only 1 player, status=waiting)
+	gm.HandleJoin("p1", ws.JoinPayload{PlayerName: "Alice", RoomCode: "TEST99"})
+	<-c1.Send // drain player_joined
+
+	// Try to grab
+	gm.HandleGrab("p1", ws.GrabPayload{CardID: "card-1"})
+
+	select {
+	case raw := <-c1.Send:
+		var m ws.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgError {
+			t.Errorf("expected error for grab-while-not-playing, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+// --- H2: grab limit per round ---
+
+func TestGameManager_GrabLimitPerRound(t *testing.T) {
+	hub := ws.NewHub()
+	repo := seedTestCards(t)
+	gm := ws.NewGameManager(hub, repo)
+
+	c1 := newTestClient("p1", "")
+	c2 := newTestClient("p2", "")
+	hub.Register(c1)
+	hub.Register(c2)
+
+	// Setup match
+	gm.HandleJoin("p1", ws.JoinPayload{PlayerName: "P1", RandomMatch: true})
+	<-c1.Send // waiting
+
+	gm.HandleJoin("p2", ws.JoinPayload{PlayerName: "P2", RandomMatch: true})
+	<-c1.Send // match_found
+	<-c2.Send // match_found
+
+	// Get card_revealed
+	msg1 := <-c1.Send
+	<-c2.Send // drain c2's card_revealed
+
+	var cardMsg ws.Message
+	if err := json.Unmarshal(msg1, &cardMsg); err != nil {
+		t.Fatal(err)
+	}
+
+	// First grab (wrong card on purpose)
+	gm.HandleGrab("p1", ws.GrabPayload{CardID: "wrong-card-id"})
+
+	// Drain grab_result for both
+	<-c1.Send
+	<-c2.Send
+
+	// Second grab should be rejected (already grabbed this round)
+	gm.HandleGrab("p1", ws.GrabPayload{CardID: "another-wrong-id"})
+
+	select {
+	case raw := <-c1.Send:
+		var m ws.Message
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgError {
+			t.Errorf("expected error for duplicate grab, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}

@@ -71,9 +71,10 @@ func (s *SeasonalService) GenerateSeasonalDeck(ctx context.Context, month int) (
 	}
 
 	// Build the valid time range for this month
-	now := time.Now()
+	// H7: use UTC for consistency. Client timezone handling is deferred to future work.
+	now := time.Now().UTC()
 	year := now.Year()
-	validFrom := time.Date(year, m, 1, 0, 0, 0, 0, time.Local)
+	validFrom := time.Date(year, m, 1, 0, 0, 0, 0, time.UTC)
 	validTo := validFrom.AddDate(0, 1, 0).Add(-time.Second)
 
 	deck := &model.Deck{

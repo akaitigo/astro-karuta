@@ -14,6 +14,12 @@ import (
 	"github.com/akaitigo/astro-karuta/backend/internal/service"
 )
 
+// Test UUIDs for handler tests (C5: user_id must be valid UUID)
+const (
+	testUserID1 = "00000000-0000-0000-0000-000000000001"
+	testUserID2 = "00000000-0000-0000-0000-000000000002"
+)
+
 func setupCollectionHandler(t *testing.T) (*http.ServeMux, *repository.InMemoryCollectionRepository) {
 	t.Helper()
 	cardRepo := repository.NewInMemoryCardRepository()
@@ -35,11 +41,11 @@ func TestListCollection_Success(t *testing.T) {
 	ctx := context.Background()
 
 	// Add some entries
-	if err := collectionRepo.AddToCollection(ctx, "user-1", "card-1", "game"); err != nil {
+	if err := collectionRepo.AddToCollection(ctx, testUserID1, "card-1", "game"); err != nil {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections?user_id=user-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections?user_id=00000000-0000-0000-0000-000000000001", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -71,7 +77,7 @@ func TestListCollection_MissingUserID(t *testing.T) {
 func TestListCollection_EmptyCollection(t *testing.T) {
 	mux, _ := setupCollectionHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections?user_id=user-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections?user_id=00000000-0000-0000-0000-000000000001", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -91,7 +97,7 @@ func TestListCollection_EmptyCollection(t *testing.T) {
 func TestListCollection_InvalidCategory(t *testing.T) {
 	mux, _ := setupCollectionHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections?user_id=user-1&category=invalid", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections?user_id=00000000-0000-0000-0000-000000000001&category=invalid", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -108,15 +114,15 @@ func TestListCollection_FilterByCategory(t *testing.T) {
 	// that exist in the collection repo (the card_id might not match seed data,
 	// but GetCollection with category filter needs the card to exist in cardRepo)
 	// For this test, we add entries and filter without category
-	if err := collectionRepo.AddToCollection(ctx, "user-1", "card-A", "game"); err != nil {
+	if err := collectionRepo.AddToCollection(ctx, testUserID1, "card-A", "game"); err != nil {
 		t.Fatal(err)
 	}
-	if err := collectionRepo.AddToCollection(ctx, "user-1", "card-B", "mission"); err != nil {
+	if err := collectionRepo.AddToCollection(ctx, testUserID1, "card-B", "mission"); err != nil {
 		t.Fatal(err)
 	}
 
 	// Without category filter, should return all entries
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections?user_id=user-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections?user_id=00000000-0000-0000-0000-000000000001", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -137,11 +143,11 @@ func TestGetStats_Success(t *testing.T) {
 	mux, collectionRepo := setupCollectionHandler(t)
 	ctx := context.Background()
 
-	if err := collectionRepo.AddToCollection(ctx, "user-1", "card-1", "game"); err != nil {
+	if err := collectionRepo.AddToCollection(ctx, testUserID1, "card-1", "game"); err != nil {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections/stats?user_id=user-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections/stats?user_id=00000000-0000-0000-0000-000000000001", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -153,7 +159,7 @@ func TestGetStats_Success(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&stats); err != nil {
 		t.Fatalf("failed to decode: %v", err)
 	}
-	if stats.UserID != "user-1" {
+	if stats.UserID != testUserID1 {
 		t.Errorf("expected user-1, got %s", stats.UserID)
 	}
 	if stats.Collected != 1 {
@@ -180,7 +186,7 @@ func TestGetStats_MissingUserID(t *testing.T) {
 func TestGetStats_EmptyCollection(t *testing.T) {
 	mux, _ := setupCollectionHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections/stats?user_id=new-user", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections/stats?user_id=00000000-0000-0000-0000-000000000002", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -197,5 +203,30 @@ func TestGetStats_EmptyCollection(t *testing.T) {
 	}
 	if stats.Percentage != 0.0 {
 		t.Errorf("expected 0.0%%, got %.1f%%", stats.Percentage)
+	}
+}
+
+// C5: test invalid UUID format
+func TestListCollection_InvalidUserIDFormat(t *testing.T) {
+	mux, _ := setupCollectionHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections?user_id=not-a-uuid", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestGetStats_InvalidUserIDFormat(t *testing.T) {
+	mux, _ := setupCollectionHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collections/stats?user_id=invalid", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
 	}
 }

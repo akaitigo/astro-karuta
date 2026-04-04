@@ -8,8 +8,11 @@ import (
 	"log"
 	"math/big"
 	mrand "math/rand"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/akaitigo/astro-karuta/backend/internal/model"
 	"github.com/akaitigo/astro-karuta/backend/internal/repository"
@@ -17,10 +20,15 @@ import (
 )
 
 const (
-	maxPlayersPerRoom = 2
-	reconnectTimeout  = 30 * time.Second
-	defaultTimeLimit  = 300 // 5 minutes
+	maxPlayersPerRoom  = 2
+	reconnectTimeout   = 30 * time.Second
+	defaultTimeLimit   = 300 // 5 minutes
+	maxPlayerNameLen   = 20
+	roomCodeLen        = 6
 )
+
+// roomCodeRegex validates that a room code is uppercase alphanumeric, 6 characters.
+var roomCodeRegex = regexp.MustCompile(`^[A-Z0-9]{6}$`)
 
 // GameState holds the state of an active game.
 type GameState struct {
@@ -48,6 +56,7 @@ type PlayerState struct {
 	CapturedIDs  []string
 	IsConnected  bool
 	DisconnectAt *time.Time
+	HasGrabbed   bool
 }
 
 // GameManager coordinates matchmaking and game lifecycle.
@@ -72,8 +81,38 @@ func NewGameManager(hub *Hub, cardRepo repository.CardRepository) *GameManager {
 	}
 }
 
+// validatePlayerName validates the player name: non-empty, max 20 chars, no control characters.
+func validatePlayerName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("player name must not be empty")
+	}
+	if utf8.RuneCountInString(name) > maxPlayerNameLen {
+		return fmt.Errorf("player name must be at most %d characters", maxPlayerNameLen)
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("player name must not contain control characters")
+		}
+	}
+	return nil
+}
+
+// validateRoomCode validates a user-supplied room code: uppercase alphanumeric, 6 chars.
+func validateRoomCode(code string) error {
+	if !roomCodeRegex.MatchString(code) {
+		return fmt.Errorf("room code must be exactly %d uppercase alphanumeric characters", roomCodeLen)
+	}
+	return nil
+}
+
 // HandleJoin processes a player's join request.
 func (gm *GameManager) HandleJoin(clientID string, payload JoinPayload) {
+	// C1: validate player name
+	if err := validatePlayerName(payload.PlayerName); err != nil {
+		gm.sendError(clientID, err.Error())
+		return
+	}
+
 	if payload.RandomMatch {
 		gm.handleRandomMatch(clientID, payload.PlayerName)
 		return
@@ -82,6 +121,12 @@ func (gm *GameManager) HandleJoin(clientID string, payload JoinPayload) {
 	roomCode := payload.RoomCode
 	if roomCode == "" {
 		roomCode = generateRoomCode()
+	} else {
+		// C1: validate user-supplied room code
+		if err := validateRoomCode(roomCode); err != nil {
+			gm.sendError(clientID, err.Error())
+			return
+		}
 	}
 
 	gm.mu.Lock()
@@ -287,6 +332,11 @@ func (gm *GameManager) revealNextCard(game *GameState) {
 	game.CurrentCard = &card
 	game.GrabHandled = false
 
+	// H2: reset grab flag for all players at the start of each round
+	for _, p := range game.Players {
+		p.HasGrabbed = false
+	}
+
 	// Build candidate list: correct card + 3 distractors
 	candidates := []model.Card{card}
 	for i, c := range game.Cards {
@@ -333,6 +383,15 @@ func (gm *GameManager) HandleGrab(clientID string, payload GrabPayload) {
 		return
 	}
 
+	// C2: verify the game is in playing state
+	game.mu.RLock()
+	if game.Status != model.GameStatusPlaying {
+		game.mu.RUnlock()
+		gm.sendError(clientID, "game is not in playing state")
+		return
+	}
+	game.mu.RUnlock()
+
 	game.GrabLock.Lock()
 	defer game.GrabLock.Unlock()
 
@@ -342,6 +401,13 @@ func (gm *GameManager) HandleGrab(clientID string, payload GrabPayload) {
 		return
 	}
 	currentCard := game.CurrentCard
+
+	// H2: check if player already grabbed this round
+	if player, ok := game.Players[clientID]; ok && player.HasGrabbed {
+		game.mu.RUnlock()
+		gm.sendError(clientID, "you already grabbed this round")
+		return
+	}
 	game.mu.RUnlock()
 
 	if currentCard == nil {
@@ -351,6 +417,11 @@ func (gm *GameManager) HandleGrab(clientID string, payload GrabPayload) {
 	correct := payload.CardID == currentCard.ID
 
 	game.mu.Lock()
+
+	// H2: mark player as having grabbed this round
+	if player, ok := game.Players[clientID]; ok {
+		player.HasGrabbed = true
+	}
 
 	playerName := ""
 	if correct {
@@ -386,6 +457,9 @@ func (gm *GameManager) HandleGrab(clientID string, payload GrabPayload) {
 }
 
 // HandleReconnect processes a reconnect attempt.
+// H1: In MVP (no auth tokens), reconnect is allowed for any client but a
+// warning is logged when the new clientID differs from the original. Full
+// session-token validation is deferred to post-MVP (see ADR-003).
 func (gm *GameManager) HandleReconnect(clientID string, payload ReconnectPayload) {
 	gm.mu.RLock()
 	game, ok := gm.games[payload.GameID]
@@ -402,6 +476,12 @@ func (gm *GameManager) HandleReconnect(clientID string, payload ReconnectPayload
 		game.mu.Unlock()
 		gm.sendError(clientID, "player not found in game")
 		return
+	}
+
+	// H1: warn if a different clientID is reconnecting as this player
+	if player.ClientID != clientID {
+		log.Printf("WARN: reconnect for player %s: original clientID=%s, new clientID=%s (MVP allows, production requires auth token)",
+			payload.PlayerID, player.ClientID, clientID)
 	}
 
 	player.IsConnected = true

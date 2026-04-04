@@ -20,6 +20,7 @@ export interface CompleteMissionRequest {
   lng: number;
 }
 
+// H4: bonus_card matches backend model.Card (all fields from JSON serialization)
 export interface CompleteMissionResponse {
   mission: UserMission;
   bonus_card?: {
@@ -27,6 +28,11 @@ export interface CompleteMissionResponse {
     name: string;
     category: string;
     reading_text: string;
+    image_url: string;
     description: string;
+    magnitude?: number;
+    distance?: string;
+    best_season: string;
+    created_at: string;
   };
 }
