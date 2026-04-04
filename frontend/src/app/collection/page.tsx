@@ -17,7 +17,7 @@ const categories: { value: CategoryFilter; label: string }[] = [
 ];
 
 // Temporary user ID until auth is implemented
-const DEFAULT_USER_ID = "user-1";
+const DEFAULT_USER_ID = "00000000-0000-4000-8000-000000000001";
 
 export default function CollectionPage() {
   const [cards, setCards] = useState<Card[]>([]);

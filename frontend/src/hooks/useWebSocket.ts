@@ -67,8 +67,8 @@ export function useWebSocket({
     }
   }, []);
 
-  // H9: pending resolve for waitForConnection promise
-  const pendingOpenRef = useRef<Array<() => void>>([]);
+  // H9: pending resolve/reject for waitForConnection promise
+  const pendingOpenRef = useRef<Array<{ resolve: () => void; reject: (err: Error) => void }>>([]);
 
   // Use a ref-based connect to avoid circular dependency in useCallback
   const connectImplRef = useRef<() => void>(() => {});
@@ -91,7 +91,7 @@ export function useWebSocket({
       setStatus("connected");
       reconnectAttemptRef.current = 0;
       // H9: resolve all pending waitForConnection promises
-      for (const resolve of pendingOpenRef.current) {
+      for (const { resolve } of pendingOpenRef.current) {
         resolve();
       }
       pendingOpenRef.current = [];
@@ -127,6 +127,12 @@ export function useWebSocket({
         reconnectTimerRef.current = setTimeout(() => {
           connectImplRef.current();
         }, delay);
+      } else {
+        // No reconnect: reject all pending waitForConnection promises to prevent leaks
+        pendingOpenRef.current.forEach(({ reject }) =>
+          reject(new Error("WebSocket connection failed"))
+        );
+        pendingOpenRef.current = [];
       }
     };
 
@@ -142,6 +148,11 @@ export function useWebSocket({
   const disconnect = useCallback(() => {
     intentionalCloseRef.current = true;
     clearReconnectTimer();
+    // Reject pending waitForConnection promises before closing
+    pendingOpenRef.current.forEach(({ reject }) =>
+      reject(new Error("WebSocket connection closed"))
+    );
+    pendingOpenRef.current = [];
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -163,8 +174,8 @@ export function useWebSocket({
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return Promise.resolve();
     }
-    return new Promise<void>((resolve) => {
-      pendingOpenRef.current.push(resolve);
+    return new Promise<void>((resolve, reject) => {
+      pendingOpenRef.current.push({ resolve, reject });
     });
   }, []);
 

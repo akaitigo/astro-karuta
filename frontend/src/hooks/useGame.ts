@@ -307,9 +307,14 @@ export function useGame({ wsUrl }: UseGameOptions): UseGameReturn {
   const connectAndSend = useCallback(
     (payload: { room_code: string; player_name: string; random_match: boolean }) => {
       connect();
-      void waitForConnection().then(() => {
-        send("join", payload);
-      });
+      waitForConnection()
+        .then(() => {
+          send("join", payload);
+        })
+        .catch(() => {
+          // Connection was closed before open (e.g. disconnect/reset called);
+          // no action needed since disconnect already handles cleanup.
+        });
     },
     [connect, waitForConnection, send],
   );
