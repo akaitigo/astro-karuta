@@ -12,6 +12,12 @@ All notable changes to this project will be documented in this file.
 - **Seasonal deck and observation missions** -- Season-aware deck generation based on current date; observation missions with GPS-based completion validation; bonus card rewards (#9)
 - **Game frontend UI** -- Lobby page with room creation/join/random match; real-time battle interface with reading cards and picture cards; score board; game result screen with winner announcement (#10)
 
+### Bug Fixes
+
+- **Security and robustness fixes** -- Input validation (room code length, user name sanitization), WebSocket origin check, rate limiting, request timeout middleware (#12, #13)
+- **errcheck lint and UUID user ID** -- All error returns properly checked; user IDs changed from sequential int to UUID; Promise leak in useGame hook fixed (#14)
+- **Game timeout and reconnect state** -- Game timeout after 10 minutes inactivity; reconnect restores full game state; graceful shutdown with in-flight game drain; matchmaking queue cleanup on disconnect (#15)
+
 ### Infrastructure
 
 - **Monorepo scaffold** -- Next.js 15 frontend (PWA) + Go 1.23 backend in a single repository with Makefile commands

@@ -8,9 +8,6 @@
 
 Astro-Karuta is a real-time multiplayer educational game that teaches children (ages 6-15) about constellations, planets, and astronomical phenomena through digital karuta matches. Players compete to grab the correct picture card when a reading clue is announced, collecting celestial objects along the way.
 
-<!-- TODO: Add screenshot -->
-![Screenshot placeholder](docs/screenshot-placeholder.png)
-
 ---
 
 ## Quick Start
@@ -77,7 +74,7 @@ make fe-build     # Next.js production build
 | Backend   | Go 1.23, net/http (stdlib router)           |
 | Testing   | Vitest + Testing Library (FE), go test (BE) |
 | CI        | GitHub Actions                              |
-| Infra     | GCP Cloud Run, Cloud Storage (planned)      |
+| Data      | In-memory (no external DB required)         |
 
 ---
 
@@ -159,6 +156,7 @@ astro-karuta/
 │   ├── config/           # Configuration
 │   ├── internal/
 │   │   ├── handler/      # HTTP + WS handlers
+│   │   ├── middleware/   # CORS, rate limiting, timeout
 │   │   ├── model/        # Domain models
 │   │   ├── repository/   # Data access (in-memory)
 │   │   ├── seed/         # Card seed data (49 cards)
