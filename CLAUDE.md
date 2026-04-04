@@ -24,8 +24,7 @@ make fe-test        # frontend tests
 make be-test        # backend tests
 make fe-lint        # frontend lint + typecheck
 make be-lint        # backend lint (golangci-lint)
-make migrate-up     # DB migration 適用
-make migrate-down   # DB migration ロールバック
+# migrate-up/migrate-down: removed (migrate CLI未実装)
 ```
 
 ## Rules

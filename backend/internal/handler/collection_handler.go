@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/akaitigo/astro-karuta/backend/internal/service"
+	"github.com/google/uuid"
 )
 
 // CollectionHandler handles HTTP requests for collection endpoints.
@@ -29,6 +30,11 @@ func (h *CollectionHandler) ListCollection(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "user_id query parameter is required")
 		return
 	}
+	// C5: validate user_id is a valid UUID
+	if _, err := uuid.Parse(userID); err != nil {
+		writeError(w, http.StatusBadRequest, "user_id must be a valid UUID")
+		return
+	}
 
 	category := r.URL.Query().Get("category")
 
@@ -46,6 +52,11 @@ func (h *CollectionHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("user_id")
 	if userID == "" {
 		writeError(w, http.StatusBadRequest, "user_id query parameter is required")
+		return
+	}
+	// C5: validate user_id is a valid UUID
+	if _, err := uuid.Parse(userID); err != nil {
+		writeError(w, http.StatusBadRequest, "user_id must be a valid UUID")
 		return
 	}
 

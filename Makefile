@@ -1,4 +1,4 @@
-.PHONY: check fe-dev be-dev fe-test be-test fe-lint be-lint fe-build be-build migrate-up migrate-down
+.PHONY: check fe-dev be-dev fe-test be-test fe-lint be-lint fe-build be-build
 
 check: fe-lint be-lint fe-test be-test fe-build be-build
 
@@ -25,9 +25,3 @@ fe-build:
 
 be-build:
 	cd backend && go build -o bin/api ./cmd/api
-
-migrate-up:
-	cd backend && go run ./cmd/migrate up
-
-migrate-down:
-	cd backend && go run ./cmd/migrate down

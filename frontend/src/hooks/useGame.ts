@@ -9,6 +9,7 @@ import type {
   CardRevealedPayload,
   GrabResultPayload,
   GameOverPayload,
+  GameStatePayload,
   PlayerJoinedPayload,
   PlayerResult,
   WaitingPayload,
@@ -58,6 +59,7 @@ type GameAction =
   | { type: "CARD_REVEALED"; payload: CardRevealedPayload }
   | { type: "GRAB_RESULT"; payload: GrabResultPayload }
   | { type: "GAME_OVER"; payload: GameOverPayload }
+  | { type: "GAME_STATE"; payload: GameStatePayload }
   | { type: "WAITING"; payload: WaitingPayload }
   | { type: "MATCH_FOUND"; roomCode: string }
   | { type: "ERROR"; message: string }
@@ -130,6 +132,15 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         scores: scoreMap,
       };
     }
+
+    // H4: handle game_state message from reconnect
+    case "GAME_STATE":
+      return {
+        ...state,
+        gameStatus: action.payload.status,
+        cardIndex: action.payload.current_index,
+        totalCards: action.payload.total_cards,
+      };
 
     case "WAITING":
       return { ...state, gameStatus: "matchmaking" };
@@ -208,6 +219,17 @@ function isErrorPayload(v: unknown): v is ErrorPayload {
   return typeof obj.message === "string";
 }
 
+function isGameStatePayload(v: unknown): v is GameStatePayload {
+  if (typeof v !== "object" || v === null) return false;
+  const obj = v as Record<string, unknown>;
+  return (
+    typeof obj.game_id === "string" &&
+    typeof obj.current_index === "number" &&
+    typeof obj.total_cards === "number" &&
+    typeof obj.status === "string"
+  );
+}
+
 function isMatchFoundPayload(
   v: unknown,
 ): v is { room_code: string } {
@@ -245,6 +267,13 @@ export function useGame({ wsUrl }: UseGameOptions): UseGameReturn {
         }
         break;
 
+      // H4: handle game_state from reconnect
+      case "game_state":
+        if (isGameStatePayload(message.payload)) {
+          dispatch({ type: "GAME_STATE", payload: message.payload });
+        }
+        break;
+
       case "waiting":
         if (isWaitingPayload(message.payload)) {
           dispatch({ type: "WAITING", payload: message.payload });
@@ -268,11 +297,22 @@ export function useGame({ wsUrl }: UseGameOptions): UseGameReturn {
     }
   }, []);
 
-  const { status, send, connect, disconnect } = useWebSocket({
+  const { status, send, connect, disconnect, waitForConnection } = useWebSocket({
     url: wsUrl,
     onMessage: handleMessage,
     autoConnect: false,
   });
+
+  // H9: helper to connect and wait for open before sending
+  const connectAndSend = useCallback(
+    (payload: { room_code: string; player_name: string; random_match: boolean }) => {
+      connect();
+      void waitForConnection().then(() => {
+        send("join", payload);
+      });
+    },
+    [connect, waitForConnection, send],
+  );
 
   const joinRoom = useCallback(
     (roomCode: string, playerName: string) => {
@@ -281,17 +321,13 @@ export function useGame({ wsUrl }: UseGameOptions): UseGameReturn {
         playerId: "",
         playerName,
       });
-      connect();
-      // Send join after a short delay for the connection to establish
-      setTimeout(() => {
-        send("join", {
-          room_code: roomCode,
-          player_name: playerName,
-          random_match: false,
-        });
-      }, 100);
+      connectAndSend({
+        room_code: roomCode,
+        player_name: playerName,
+        random_match: false,
+      });
     },
-    [connect, send],
+    [connectAndSend],
   );
 
   const createRoom = useCallback(
@@ -301,16 +337,13 @@ export function useGame({ wsUrl }: UseGameOptions): UseGameReturn {
         playerId: "",
         playerName,
       });
-      connect();
-      setTimeout(() => {
-        send("join", {
-          room_code: "",
-          player_name: playerName,
-          random_match: false,
-        });
-      }, 100);
+      connectAndSend({
+        room_code: "",
+        player_name: playerName,
+        random_match: false,
+      });
     },
-    [connect, send],
+    [connectAndSend],
   );
 
   const randomMatch = useCallback(
@@ -321,16 +354,13 @@ export function useGame({ wsUrl }: UseGameOptions): UseGameReturn {
         playerName,
       });
       dispatch({ type: "START_MATCHMAKING" });
-      connect();
-      setTimeout(() => {
-        send("join", {
-          room_code: "",
-          player_name: playerName,
-          random_match: true,
-        });
-      }, 100);
+      connectAndSend({
+        room_code: "",
+        player_name: playerName,
+        random_match: true,
+      });
     },
-    [connect, send],
+    [connectAndSend],
   );
 
   const grabCard = useCallback(

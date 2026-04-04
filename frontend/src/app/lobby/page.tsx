@@ -60,12 +60,13 @@ export default function LobbyPage() {
     [router],
   );
 
-  const { send, connect, status } = useWebSocket({
+  const { send, connect, status, waitForConnection } = useWebSocket({
     url: WS_URL,
     onMessage: handleMessage,
     autoConnect: false,
   });
 
+  // H9: use waitForConnection instead of fragile setTimeout
   const ensureConnectedAndSend = useCallback(
     (
       roomCodeVal: string,
@@ -79,16 +80,15 @@ export default function LobbyPage() {
       }
 
       connect();
-      // Wait for connection to establish before sending
-      setTimeout(() => {
+      void waitForConnection().then(() => {
         send("join", {
           room_code: roomCodeVal,
           player_name: playerNameVal,
           random_match: randomMatch,
         });
-      }, 200);
+      });
     },
-    [connect, send],
+    [connect, send, waitForConnection],
   );
 
   const handleRandomMatch = useCallback(() => {

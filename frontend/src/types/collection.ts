@@ -13,10 +13,4 @@ export interface CollectionStats {
   percentage: number;
 }
 
-export interface ObservationMission {
-  id: string;
-  card_id: string;
-  title: string;
-  valid_from: string;
-  valid_to: string;
-}
+// H4: ObservationMission removed -- unused, missions are in mission.ts

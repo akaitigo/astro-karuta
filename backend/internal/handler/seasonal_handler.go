@@ -6,6 +6,7 @@ import (
 
 	"github.com/akaitigo/astro-karuta/backend/internal/model"
 	"github.com/akaitigo/astro-karuta/backend/internal/service"
+	"github.com/google/uuid"
 )
 
 // SeasonalHandler handles HTTP requests for seasonal and mission endpoints.
@@ -35,6 +36,11 @@ func (h *SeasonalHandler) ListMissions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "user_id is required")
 		return
 	}
+	// C5: validate user_id is a valid UUID
+	if _, err := uuid.Parse(userID); err != nil {
+		writeError(w, http.StatusBadRequest, "user_id must be a valid UUID")
+		return
+	}
 
 	missions, err := h.missionSvc.GetActiveMissions(r.Context(), userID)
 	if err != nil {
@@ -61,6 +67,11 @@ func (h *SeasonalHandler) CompleteMission(w http.ResponseWriter, r *http.Request
 
 	if req.UserID == "" {
 		writeError(w, http.StatusBadRequest, "user_id is required")
+		return
+	}
+	// C5: validate user_id is a valid UUID
+	if _, err := uuid.Parse(req.UserID); err != nil {
+		writeError(w, http.StatusBadRequest, "user_id must be a valid UUID")
 		return
 	}
 

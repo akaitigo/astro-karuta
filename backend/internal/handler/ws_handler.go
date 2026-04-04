@@ -3,7 +3,6 @@ package handler
 import (
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -22,16 +21,17 @@ const (
 	maxWSConnections = 200
 )
 
-// allowedOrigins returns the set of allowed WebSocket origins from the
-// CORS_ORIGIN environment variable. Multiple origins can be separated by
-// commas. When the variable is empty the default development origin is used.
-func allowedOrigins() map[string]bool {
-	raw := os.Getenv("CORS_ORIGIN")
-	if raw == "" {
-		raw = "http://localhost:3000"
+// parseAllowedOrigins builds a set of allowed origins from the CORS config string.
+// If corsOrigin is "*", returns nil to indicate all origins are allowed (dev mode).
+func parseAllowedOrigins(corsOrigin string) map[string]bool {
+	if corsOrigin == "*" {
+		return nil // nil signals "allow all"
+	}
+	if corsOrigin == "" {
+		corsOrigin = "http://localhost:3000"
 	}
 	origins := make(map[string]bool)
-	for _, o := range strings.Split(raw, ",") {
+	for _, o := range strings.Split(corsOrigin, ",") {
 		o = strings.TrimSpace(o)
 		if o != "" {
 			origins[o] = true
@@ -40,29 +40,37 @@ func allowedOrigins() map[string]bool {
 	return origins
 }
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			// Allow connections without an Origin header (e.g. non-browser clients).
-			return true
-		}
-		return allowedOrigins()[origin]
-	},
-}
-
 // WSHandler handles WebSocket connections.
 type WSHandler struct {
-	hub       *ws.Hub
-	gm        *ws.GameManager
-	connCount atomic.Int64
+	hub            *ws.Hub
+	gm             *ws.GameManager
+	connCount      atomic.Int64
+	upgrader       websocket.Upgrader
 }
 
 // NewWSHandler creates a new WSHandler.
-func NewWSHandler(hub *ws.Hub, gm *ws.GameManager) *WSHandler {
-	return &WSHandler{hub: hub, gm: gm}
+// C4: corsOrigin is passed from config to avoid direct os.Getenv usage.
+func NewWSHandler(hub *ws.Hub, gm *ws.GameManager, corsOrigin string) *WSHandler {
+	allowed := parseAllowedOrigins(corsOrigin)
+
+	h := &WSHandler{hub: hub, gm: gm}
+	h.upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			// C4: if allowed is nil, wildcard mode (dev) -- allow everything
+			if allowed == nil {
+				return true
+			}
+			origin := r.Header.Get("Origin")
+			// C4: reject connections with empty Origin in production
+			if origin == "" {
+				return false
+			}
+			return allowed[origin]
+		},
+	}
+	return h
 }
 
 // RegisterRoutes registers WebSocket routes.
@@ -77,7 +85,7 @@ func (h *WSHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("ws upgrade error: %v", err)
 		return

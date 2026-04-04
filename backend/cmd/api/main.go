@@ -10,7 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/akaitigo/astro-karuta/backend/config"
 	"github.com/akaitigo/astro-karuta/backend/internal/handler"
+	"github.com/akaitigo/astro-karuta/backend/internal/middleware"
 	"github.com/akaitigo/astro-karuta/backend/internal/repository"
 	"github.com/akaitigo/astro-karuta/backend/internal/seed"
 	"github.com/akaitigo/astro-karuta/backend/internal/service"
@@ -18,10 +20,8 @@ import (
 )
 
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	// C3: use config.Load() as single source of truth for configuration
+	cfg := config.Load()
 
 	cardRepo := repository.NewInMemoryCardRepository()
 	deckRepo := repository.NewInMemoryDeckRepository()
@@ -35,7 +35,7 @@ func main() {
 	missionRepo := repository.NewInMemoryMissionRepository()
 
 	seasonalSvc := service.NewSeasonalService(cardRepo, deckRepo)
-	missionSvc := service.NewMissionService(missionRepo, cardRepo)
+	missionSvc := service.NewMissionService(missionRepo, cardRepo, collectionRepo)
 
 	cardSvc := service.NewCardService(cardRepo, deckRepo)
 	cardSvc.SetSeasonalService(seasonalSvc)
@@ -48,7 +48,7 @@ func main() {
 
 	hub := ws.NewHub()
 	gm := ws.NewGameManager(hub, cardRepo)
-	wsHandler := handler.NewWSHandler(hub, gm)
+	wsHandler := handler.NewWSHandler(hub, gm, cfg.CORSOrigin)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
@@ -60,16 +60,19 @@ func main() {
 	seasonalHandler.RegisterRoutes(mux)
 	wsHandler.RegisterRoutes(mux)
 
+	// H3: wrap mux with CORS middleware
+	corsHandler := middleware.CORS(cfg.CORSOrigin)(mux)
+
 	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      mux,
+		Addr:         ":" + cfg.Port,
+		Handler:      corsHandler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
 	go func() {
-		log.Printf("server starting on :%s", port)
+		log.Printf("server starting on :%s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}

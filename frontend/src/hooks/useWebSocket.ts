@@ -19,6 +19,8 @@ interface UseWebSocketReturn {
   send: (type: WSMessageType, payload: unknown) => void;
   connect: () => void;
   disconnect: () => void;
+  /** H9: returns a promise that resolves when the connection is open */
+  waitForConnection: () => Promise<void>;
 }
 
 const BASE_DELAY_MS = 1000;
@@ -65,6 +67,9 @@ export function useWebSocket({
     }
   }, []);
 
+  // H9: pending resolve for waitForConnection promise
+  const pendingOpenRef = useRef<Array<() => void>>([]);
+
   // Use a ref-based connect to avoid circular dependency in useCallback
   const connectImplRef = useRef<() => void>(() => {});
 
@@ -85,6 +90,11 @@ export function useWebSocket({
     ws.onopen = () => {
       setStatus("connected");
       reconnectAttemptRef.current = 0;
+      // H9: resolve all pending waitForConnection promises
+      for (const resolve of pendingOpenRef.current) {
+        resolve();
+      }
+      pendingOpenRef.current = [];
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -148,6 +158,16 @@ export function useWebSocket({
     [],
   );
 
+  // H9: wait until the WebSocket connection is open, resolving immediately if already open
+  const waitForConnection = useCallback((): Promise<void> => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      pendingOpenRef.current.push(resolve);
+    });
+  }, []);
+
   useEffect(() => {
     if (autoConnect) {
       connect();
@@ -155,6 +175,8 @@ export function useWebSocket({
     return () => {
       intentionalCloseRef.current = true;
       clearReconnectTimer();
+      // H9: reject pending waiters on cleanup
+      pendingOpenRef.current = [];
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -162,5 +184,5 @@ export function useWebSocket({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { status, send, connect, disconnect };
+  return { status, send, connect, disconnect, waitForConnection };
 }

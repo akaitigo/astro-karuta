@@ -18,17 +18,20 @@ const maxLatitudeDeviation = 30.0
 
 // MissionService provides business logic for observation missions.
 type MissionService struct {
-	missionRepo repository.MissionRepository
-	cardRepo    repository.CardRepository
-	nowFunc     func() time.Time
+	missionRepo    repository.MissionRepository
+	cardRepo       repository.CardRepository
+	collectionRepo repository.CollectionRepository
+	nowFunc        func() time.Time
 }
 
 // NewMissionService creates a new MissionService.
-func NewMissionService(missionRepo repository.MissionRepository, cardRepo repository.CardRepository) *MissionService {
+// H10: collectionRepo is injected to auto-add bonus cards to the user's collection.
+func NewMissionService(missionRepo repository.MissionRepository, cardRepo repository.CardRepository, collectionRepo repository.CollectionRepository) *MissionService {
 	return &MissionService{
-		missionRepo: missionRepo,
-		cardRepo:    cardRepo,
-		nowFunc:     time.Now,
+		missionRepo:    missionRepo,
+		cardRepo:       cardRepo,
+		collectionRepo: collectionRepo,
+		nowFunc:        time.Now,
 	}
 }
 
@@ -77,7 +80,8 @@ func (s *MissionService) GetActiveMissions(ctx context.Context, userID string) (
 	}
 
 	// Create up to 5 missions from visible constellations
-	validFrom := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+	// H7: use UTC for consistency. Client timezone handling is deferred to future work.
+	validFrom := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	validTo := validFrom.AddDate(0, 1, 0).Add(-time.Second)
 
 	var generated []model.UserMission
@@ -119,6 +123,11 @@ func (s *MissionService) CompleteMission(ctx context.Context, userID string, mis
 	}
 	if missionID == "" {
 		return nil, fmt.Errorf("mission ID must not be empty")
+	}
+
+	// H6: reject zero-value coordinates (likely uninitialized / missing GPS)
+	if lat == 0 && lng == 0 {
+		return nil, fmt.Errorf("coordinates must not be zero (lat=0, lng=0); GPS data is required")
 	}
 
 	mission, err := s.missionRepo.GetByID(ctx, missionID)
@@ -168,6 +177,11 @@ func (s *MissionService) CompleteMission(ctx context.Context, userID string, mis
 		return nil, fmt.Errorf("get bonus card: %w", err)
 	}
 
+	// H10: auto-add the bonus card to the user's collection
+	if err := s.collectionRepo.AddToCollection(ctx, userID, mission.CardID, "mission"); err != nil {
+		return nil, fmt.Errorf("add bonus card to collection: %w", err)
+	}
+
 	return &model.CompleteMissionResponse{
 		Mission:   *mission,
 		BonusCard: card,
@@ -175,6 +189,7 @@ func (s *MissionService) CompleteMission(ctx context.Context, userID string, mis
 }
 
 // validateNighttime checks that the time is between 18:00 and 06:00.
+// H7: UTC-based. Client timezone conversion is deferred to future work.
 func validateNighttime(t time.Time) error {
 	hour := t.Hour()
 	if hour >= 6 && hour < 18 {
