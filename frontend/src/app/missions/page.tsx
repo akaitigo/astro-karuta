@@ -8,7 +8,7 @@ import type { UserMission, CompleteMissionResponse } from "@/types/mission";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 // Temporary user ID until auth is implemented
-const DEFAULT_USER_ID = "user-1";
+const DEFAULT_USER_ID = "00000000-0000-4000-8000-000000000001";
 
 export default function MissionsPage() {
   const [missions, setMissions] = useState<UserMission[]>([]);

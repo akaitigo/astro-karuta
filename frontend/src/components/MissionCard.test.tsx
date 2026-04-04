@@ -9,7 +9,7 @@ function createMission(overrides: Partial<UserMission> = {}): UserMission {
 
   return {
     id: "mission-1",
-    user_id: "user-1",
+    user_id: "00000000-0000-4000-8000-000000000001",
     mission_id: "obs-7-card-1",
     card_id: "card-1",
     title: "オリオン座を観測しよう",

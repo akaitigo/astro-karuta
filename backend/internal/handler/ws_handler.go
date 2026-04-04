@@ -111,7 +111,9 @@ func (h *WSHandler) readPump(client *ws.Client, connCount *atomic.Int64) {
 		connCount.Add(-1)
 		h.gm.HandleDisconnect(client.ID)
 		h.hub.Unregister(client)
-		client.Conn.Close()
+		if err := client.Conn.Close(); err != nil {
+			log.Printf("ws: conn close error: %v", err)
+		}
 	}()
 
 	client.Conn.SetReadLimit(maxMsgSize)
@@ -139,7 +141,9 @@ func (h *WSHandler) writePump(client *ws.Client) {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		client.Conn.Close()
+		if err := client.Conn.Close(); err != nil {
+			log.Printf("ws: conn close error: %v", err)
+		}
 	}()
 
 	for {

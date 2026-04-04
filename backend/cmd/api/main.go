@@ -53,7 +53,9 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok"}`)
+		if _, err := fmt.Fprintf(w, `{"status":"ok"}`); err != nil {
+			log.Printf("health check write error: %v", err)
+		}
 	})
 	cardHandler.RegisterRoutes(mux)
 	collectionHandler.RegisterRoutes(mux)
