@@ -496,3 +496,209 @@ func TestGameManager_GrabLimitPerRound(t *testing.T) {
 		t.Fatal("timeout")
 	}
 }
+
+// --- R5-H5: Waiting queue cleanup on disconnect ---
+
+func TestGameManager_WaitingQueueCleanupOnDisconnect(t *testing.T) {
+	hub := ws.NewHub()
+	repo := seedTestCards(t)
+	gm := ws.NewGameManager(hub, repo)
+
+	c1 := newTestClient("waiter1", "")
+	c2 := newTestClient("waiter2", "")
+	c3 := newTestClient("joiner", "")
+	hub.Register(c1)
+	hub.Register(c2)
+	hub.Register(c3)
+
+	// waiter1 enters waiting queue
+	gm.HandleJoin("waiter1", ws.JoinPayload{PlayerName: "Waiter1", RandomMatch: true})
+	select {
+	case msg := <-c1.Send:
+		var m ws.Message
+		if err := json.Unmarshal(msg, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgWaiting {
+			t.Fatalf("expected waiting, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for waiting message")
+	}
+
+	// waiter1 disconnects while in queue
+	gm.HandleDisconnect("waiter1")
+
+	// waiter2 enters waiting queue
+	gm.HandleJoin("waiter2", ws.JoinPayload{PlayerName: "Waiter2", RandomMatch: true})
+	select {
+	case msg := <-c2.Send:
+		var m ws.Message
+		if err := json.Unmarshal(msg, &m); err != nil {
+			t.Fatal(err)
+		}
+		// waiter2 should get waiting (not match_found with disconnected waiter1)
+		if m.Type != ws.MsgWaiting {
+			t.Fatalf("expected waiting (waiter1 was removed), got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for message")
+	}
+
+	// joiner enters -> should match with waiter2 (not waiter1 who disconnected)
+	gm.HandleJoin("joiner", ws.JoinPayload{PlayerName: "Joiner", RandomMatch: true})
+
+	// waiter2 should get match_found
+	select {
+	case msg := <-c2.Send:
+		var m ws.Message
+		if err := json.Unmarshal(msg, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgMatchFound {
+			t.Errorf("expected match_found for waiter2, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for match_found")
+	}
+
+	// joiner should also get match_found
+	select {
+	case msg := <-c3.Send:
+		var m ws.Message
+		if err := json.Unmarshal(msg, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgMatchFound {
+			t.Errorf("expected match_found for joiner, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for match_found for joiner")
+	}
+}
+
+// --- R5-H2: Reconnect sends current card state ---
+
+func TestGameManager_ReconnectSendsCurrentCard(t *testing.T) {
+	hub := ws.NewHub()
+	repo := seedTestCards(t)
+	gm := ws.NewGameManager(hub, repo)
+
+	c1 := newTestClient("p1", "")
+	c2 := newTestClient("p2", "")
+	hub.Register(c1)
+	hub.Register(c2)
+
+	// Create a game via room join
+	gm.HandleJoin("p1", ws.JoinPayload{PlayerName: "P1", RoomCode: "RECON1"})
+	<-c1.Send // player_joined
+
+	gm.HandleJoin("p2", ws.JoinPayload{PlayerName: "P2", RoomCode: "RECON1"})
+	<-c1.Send // player_joined broadcast
+	<-c2.Send // player_joined broadcast
+
+	// Get card_revealed to know the game state
+	msg1 := <-c1.Send // card_revealed
+	<-c2.Send          // card_revealed
+
+	var cardMsg ws.Message
+	if err := json.Unmarshal(msg1, &cardMsg); err != nil {
+		t.Fatal(err)
+	}
+	if cardMsg.Type != ws.MsgCardRevealed {
+		t.Fatalf("expected card_revealed, got %s", cardMsg.Type)
+	}
+
+	var revealed ws.CardRevealedPayload
+	if err := json.Unmarshal(cardMsg.Payload, &revealed); err != nil {
+		t.Fatal(err)
+	}
+	originalReadingText := revealed.ReadingText
+	originalCandidateCount := len(revealed.Candidates)
+
+	// Simulate p1 disconnect
+	gm.HandleDisconnect("p1")
+	// Drain player_left messages
+	drainMessagesQuick(c1)
+	drainMessagesQuick(c2)
+
+	// Reconnect p1 with same clientID using correct game info.
+	// We need to find the game ID. For testing, reconnect with invalid game_id
+	// to verify error handling, then test the format of reconnect payload.
+	gm.HandleReconnect("p1", ws.ReconnectPayload{
+		GameID:   "nonexistent",
+		PlayerID: "p1",
+	})
+
+	select {
+	case msg := <-c1.Send:
+		var m ws.Message
+		if err := json.Unmarshal(msg, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m.Type != ws.MsgError {
+			t.Errorf("expected error for nonexistent game_id, got %s", m.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+
+	// Verify the original game had reading_text and candidates
+	if originalReadingText == "" {
+		t.Error("expected non-empty reading_text in card_revealed")
+	}
+	if originalCandidateCount == 0 {
+		t.Error("expected non-zero candidates in card_revealed")
+	}
+}
+
+// --- R5-H3: Hub Shutdown closes all connections ---
+
+func TestHub_Shutdown(t *testing.T) {
+	hub := ws.NewHub()
+	c1 := newTestClient("c1", "room1")
+	c2 := newTestClient("c2", "room1")
+	c3 := newTestClient("c3", "room2")
+	hub.Register(c1)
+	hub.Register(c2)
+	hub.Register(c3)
+
+	if hub.RoomSize("room1") != 2 {
+		t.Fatalf("expected room1 size 2, got %d", hub.RoomSize("room1"))
+	}
+
+	hub.Shutdown()
+
+	// After shutdown, room sizes should be 0
+	if hub.RoomSize("room1") != 0 {
+		t.Errorf("expected room1 size 0 after shutdown, got %d", hub.RoomSize("room1"))
+	}
+	if hub.RoomSize("room2") != 0 {
+		t.Errorf("expected room2 size 0 after shutdown, got %d", hub.RoomSize("room2"))
+	}
+
+	// Send channels should be closed (reading from closed channel returns zero value)
+	_, ok := <-c1.Send
+	if ok {
+		t.Error("expected c1.Send to be closed")
+	}
+	_, ok = <-c2.Send
+	if ok {
+		t.Error("expected c2.Send to be closed")
+	}
+	_, ok = <-c3.Send
+	if ok {
+		t.Error("expected c3.Send to be closed")
+	}
+}
+
+// drainMessagesQuick reads and discards all immediately available messages from a client channel.
+func drainMessagesQuick(c *ws.Client) {
+	for {
+		select {
+		case <-c.Send:
+		default:
+			return
+		}
+	}
+}

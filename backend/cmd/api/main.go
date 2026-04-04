@@ -90,5 +90,9 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("server shutdown error: %v", err)
 	}
+
+	// R5-H3: close all WebSocket connections to prevent goroutine leaks
+	hub.Shutdown()
+
 	log.Println("server stopped")
 }

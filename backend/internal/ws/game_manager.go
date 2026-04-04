@@ -45,6 +45,7 @@ type GameState struct {
 	GrabHandled    bool
 	TimeLimitSec   int
 	StartedAt      time.Time
+	timeoutTimer   *time.Timer // R5-H1: game timeout timer; stopped on normal end
 }
 
 // PlayerState tracks an individual player within a game.
@@ -275,6 +276,8 @@ func (gm *GameManager) createGameState(roomCode string) *GameState {
 
 	shuffled := make([]model.Card, len(cards))
 	copy(shuffled, cards)
+	// R5-H4: Go 1.20+ automatically seeds math/rand with a random value.
+	// No explicit seed call is needed (go.mod specifies go 1.23).
 	mrand.Shuffle(len(shuffled), func(i, j int) {
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	})
@@ -314,6 +317,13 @@ func (gm *GameManager) startGame(game *GameState) {
 	game.mu.Lock()
 	game.Status = model.GameStatusPlaying
 	game.StartedAt = time.Now()
+
+	// R5-H1: set game timeout timer
+	game.timeoutTimer = time.AfterFunc(time.Duration(game.TimeLimitSec)*time.Second, func() {
+		log.Printf("game %s timed out after %d seconds", game.ID, game.TimeLimitSec)
+		gm.endGame(game)
+	})
+
 	game.mu.Unlock()
 
 	log.Printf("game %s started in room %s", game.ID, game.RoomCode)
@@ -491,13 +501,27 @@ func (gm *GameManager) HandleReconnect(clientID string, payload ReconnectPayload
 
 	gm.hub.JoinRoom(clientID, game.RoomCode)
 
-	// Send current game state
+	// Send current game state including current card info for seamless reconnect
 	game.mu.RLock()
 	statePayload := map[string]interface{}{
 		"game_id":       game.ID,
 		"current_index": game.CurrentIndex,
 		"total_cards":   len(game.Cards),
 		"status":        game.Status,
+	}
+
+	// R5-H2: include current card and candidates so reconnected client can resume play
+	if game.CurrentCard != nil {
+		statePayload["reading_text"] = game.CurrentCard.ReadingText
+		candidateCards := make([]CandidateCard, len(game.Candidates))
+		for i, c := range game.Candidates {
+			candidateCards[i] = CandidateCard{
+				ID:       c.ID,
+				Name:     c.Name,
+				ImageURL: c.ImageURL,
+			}
+		}
+		statePayload["candidates"] = candidateCards
 	}
 	game.mu.RUnlock()
 
@@ -511,6 +535,17 @@ func (gm *GameManager) HandleReconnect(clientID string, payload ReconnectPayload
 
 // HandleDisconnect handles a player disconnection.
 func (gm *GameManager) HandleDisconnect(clientID string) {
+	// R5-H5: remove disconnected client from the waiting queue to prevent memory leak
+	gm.mu.Lock()
+	for i, id := range gm.waitingQueue {
+		if id == clientID {
+			gm.waitingQueue = append(gm.waitingQueue[:i], gm.waitingQueue[i+1:]...)
+			delete(gm.waitingNames, clientID)
+			break
+		}
+	}
+	gm.mu.Unlock()
+
 	game := gm.findGameByClient(clientID)
 	if game == nil {
 		return
@@ -562,6 +597,11 @@ func (gm *GameManager) endGame(game *GameState) {
 		return
 	}
 	game.Status = model.GameStatusFinished
+
+	// R5-H1: cancel timeout timer if still running
+	if game.timeoutTimer != nil {
+		game.timeoutTimer.Stop()
+	}
 
 	var results []PlayerResult
 	var winnerID string
